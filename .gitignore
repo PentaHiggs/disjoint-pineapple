@@ -1,0 +1,9 @@
+# Ignoring all binaries
+bin/**
+
+# Ignore log files
+logs/**
+
+# Ignore outputs of program
+outputs/**
+**.swp
