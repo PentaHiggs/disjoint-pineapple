@@ -1,6 +1,8 @@
 #include <iostream>
 #include <cstdlib>
 
+#include "logging.hpp"
+
 // includes:
 // allheaders.h
 // baseapi.h
@@ -13,22 +15,22 @@
 // tprintf.h
 
 // Contains all of the headers for leptonica functionality (class pix defined there)
-#include "allheaders.h"
+#include <leptonica/allheaders.h>
 
 // For renderer functionality
-#include "renderer.h"
+#include <tesseract/renderer.h>
 
 // Contains the class definitions for tesseract::TessBaseApi.  Requires using std::string in unichar.h
 #include<string>
 using std::string;
-#include "baseapi.h"
+#include <tesseract/baseapi.h>
 
 // Requires some complicated nonsense involving dict.h which you can't get from include headers
 // Include this file in order to use GlobalDawgCache()
 ///#include "dict.h"
 
 // Include this in order to get access to tesseract settings enums
-#include "publictypes.h"
+#include <tesseract/publictypes.h>
 
 
 using std::cout;
@@ -45,6 +47,11 @@ int main() {
 	// useful sometimes for large variables.
 	// static tesseract::TessBaseAPI api;
 
+	loglib::logger lg;
+	loglib::init();
+	
+	EZ_LOG(lg, loglib::debug) << "Tesseract start";
+
 	tesseract::TessBaseAPI api;
 
 	const char* outputName = "purr_TESS_ONLY";
@@ -54,15 +61,15 @@ int main() {
 	const char* tessdata_parent_dir = "/usr/local/share/tessdata/";
 
 	// Language to be used.  We want English.
-	const char* language = "eng";
+	//const char* language = "eng";
 
 	// Filename of image to be processed.
-	const char* image = "./seq-2.jp2";
+	const char* image = "inputs/seq-2.jp2";
 
 	// Engine mode.  We want to use both the neural network and tesseract classic
 	// to fall back on if it doesn't work out.
-	//auto engineMode = tesseract::OcrEngineMode::OEM_TESSERACT_LSTM_COMBINED;
-	auto engineMode = tesseract::OcrEngineMode::OEM_TESSERACT_ONLY;
+	auto engineMode = tesseract::OcrEngineMode::OEM_TESSERACT_LSTM_COMBINED;
+	//auto engineMode = tesseract::OcrEngineMode::OEM_TESSERACT_ONLY;
 
 	int ret = api.Init(tessdata_parent_dir, NULL, engineMode);
 
@@ -98,4 +105,5 @@ int main() {
 		cout << "Processing stage failed." << endl;
 		return EXIT_FAILURE;
 	}
+	EZ_LOG(lg, loglib::debug) << "Tesseract end";
 }
