@@ -8,10 +8,12 @@ DEBUG = -g
 # Libraries needed
 LOG_LDFLAGS = -lboost_log -lboost_log_setup -lboost_thread -lpthread -lboost_filesystem -lboost_system -lstdc++
 LOG_CFLAGS = $(CFLAGS) -c -I/usr/include/
-TESS_CFLAGS = $(CFLAGS) -c -I/usr/local/include/leptonica -I/usr/local/include/tesseract
+TESS_CFLAGS = $(CFLAGS) -c
 TESS_LIBS = -L/usr/local/lib/
 TESS_LDFLAGS = -ltesseract
 
+main: include/logging.hpp bin/logging.o
+	$(CC) $(CFLAGS) src/main.cpp bin/logging.o -o bin/main -DBOOST_LOG_DYN_LINK $(LOG_LDFLAGS) $(TESS_LDFLAGS)
 
 logging_test: bin/logging.o bin/logging_test.o
 	$(CC) $(CFLAGS) bin/logging.o bin/logging_test.o -o bin/logging_test -DBOOST_LOG_DYN_LINK $(LOG_LDFLAGS)
