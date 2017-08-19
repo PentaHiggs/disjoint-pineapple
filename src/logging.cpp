@@ -28,7 +28,8 @@ static void my_formatter(logging_::record_view const& rec, logging_::formatting_
 {
 	// Add timestamp information
 	const boost::posix_time::ptime &pt = *logging_::extract< boost::posix_time::ptime >("TimeStamp", rec);	
-    strm << pt.date() << " " << pt.time_of_day().hours() << ":" << pt.time_of_day().minutes();
+    strm << pt.date() << " " << std::setw(2) << std::setfill('0') << pt.time_of_day().hours() << ":";
+	strm << std::setw(2) << std::setfill('0') << pt.time_of_day().minutes();
 	strm << ":" << std::setw(2) << std::setfill('0') << pt.time_of_day().seconds() << " | ";
 
 	// Get the LineID attribute value and put it into the stream
