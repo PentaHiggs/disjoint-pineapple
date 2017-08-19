@@ -55,7 +55,7 @@ void loglib::init()
     boost::shared_ptr< text_sink > sink = boost::make_shared< text_sink >();
 
     sink->locked_backend()->add_stream(
-        boost::make_shared< std::ofstream >("logs/debug.log"));
+        boost::make_shared< std::ofstream >("logs/debug.log" , std::ios::out | std::ios::app));
 
     sink->set_formatter(&my_formatter);
 
