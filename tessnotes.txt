@@ -1,0 +1,97 @@
+Let our string be
+const char* filename = "image.jpg"
+
+and our renderer be
+TessResultRenderer* renderer = ....;
+
+1.  TessBaseAPI::ProcessPages(filename, NULL, 0, renderer)
+This then calls
+2.  TessBaseAPI::ProcessPagesInternal(filename, NULL, 0, renderer)
+	a. We do some detection of whether we have a buffer format for filename inputs
+	b. We try and find out if the file is actually a list of names.  In which case, we extract the entire
+		file as a string and then use ProcessPageFileList on it.
+	c. We try to read image into a Pix object, either from filename with pixRead(filename) or with input from
+		cin being placed into a buffer.  Assuming no multipage TIFFs, we proceed to
+3.  TessBaseAPI::ProcessPage(loadedFile, 0, filename, NULL, 0, renderer)
+	a.  const char* input_file_ set to filename
+	b.	thresholder_->setImage(loadedFile) (so we're initializing the thresholder to the loaded Pix file) and some confusing code;
+		namely, SetInputImage(thresholder_->GetPixRect());  This doesn't do much beside set the image for the tesseract_ object, it hasn't
+		been thresholded yet, so conceviably GetPixRect() returns the entire Pix
+4.  TessBaseAPI::Recognize(NULL)
+5.  TessBaseAPI::FindLines()
+	a.  Runs Classify::InitAdaptiveClassifier from adaptmatch.cpp[527] to initialize the adapative classifier, imports the language data.
+	b.  Actually runs the thresholder with Threshold(tesseract_->mutable_pix_binary());
+	c.  Actually... the real thresholder is ImageThresholder::ThresholdToPix(pageseg_mode, Pix** pix) [ not sure why not Pix* &pix ]
+		i.  For some reason, ImageThresholder::ThresholdToPix doesn't actually use its pageseg_mode argument.. odd!
+		ii. ThresholdToPix performs otsu thresholding!  It tries to use openCL, but it actually doesn't, for whatever reason
+	d.  Tesseract::PrepareForPageseg()
+		i.  Initializes segmentation stuff... uses something called the "cjk_fp_model"
+		ii.	And it uses a "ShiroRekhaSplitter"... with something called a "devanagari split strategy"
+		iii.It seems that we iterate through all of the languages selected, and each language has its own
+			pageseg_devangari_spli_strategy (Each sublanguage is, in fact, a pointer to a Tesseract object)
+
+			-- Shiro Rekha splitting -- 
+	(only actually relevant for Devangari script languages, like hindi and bengali, but I still went through the process like an idiot.  
+	Essentially, this splits those languages graphemes.  This is necessary since they're all connected by something called a shirorekha
+	line... Thus, we need this special splitting strategy to get the graphemes necessary for OCR)
+
+6.  ShiroRekhaSplitter::Split(true, &debug_pix)
+	a. it sets up for a split, cloning image for debug if needed and setting up for splitting
+	b. Boxa* pixConnComp(pix_for_css, &css, 8) -  This does 8-way connected component analysis on the pix.  In greater detail, since the image
+		has undergone Otsu thresholding at this point, it consists completely of just on and off pixels.  pixConnComp then separates the image
+		into connected components, where the components are 8-way connected (namely, they can be connected diagonally as well as horizontally
+		and vertically.)  ccs is a Pixa*, a pointer to an array of Pix objects, and this is, presumably, where the connected components are
+		placed.  An array of Box objects is also returned, but it seems to be destroyed immediately after this function call.  These are the 
+		bounding boxes for the connected components, I believe.
+	c. Find out how many connected components (ccs) there are, then iterate over all of them.  First, we use the regions obtained by the 
+		connected component analysis to clip corresponding areas from the original (thresholded, I imagine) region.
+		i. Run SplitWordShiroRekha on the connected component....
+		ii. SplitWordShiroRekha(split_strategy, word_pix, xheight, box->x, box->y, regions_to_clear) , 
+			where split_strategy is the maximal or minimal
+			split strategy from before, word_pix is the pix representing the connected component, xheight is the height of the row it belongs to
+			returned by GetXHeightForCC, the box is the bounding box for the connected component, and regions_to_clear is an empty Box array.
+			a.  They do things like taking a histogram to find the top-line, but that's hindi script shit.  There's no way it can be useful
+				for western languages... ( Done in function GetShrioRekhaYExtents, btw )
+			b.	Do the shirorekha splitting and return the middle areas to clear, in order to properly split the hindi (and other languages, like
+				bengali) graphemes.  Somehow, this should be avoided when using western languages.
+		
+
+		-- /end Shiro Rekha Splitting.  Essentially, we deleted parts of the connecting line in hindi to separate the graphemes.
+
+	-- Continuation of FindLines() --
+
+	e. If OSD is enabled ( Orientation and Script detection, not needed if text is perfectly horizontal and script type is known ), we make
+		a new tesseract object to perform it if one doesn't exist, unless we're just doing OSD and nothing else in which case current tess
+		becomes the osd_tess
+	f. Tesseract::SegmentPage() to segment the page
+	g. Tesseract::AutoPageSeg() called within SegmentPage to do the actual page segmentation.  Included here, too is functionality from
+		Tesseract::SetupPageSegAndDetectOrientation, since it honestly belongs in AutoPageSeg, and isn't a cohesive chunk of separate
+		functionality.
+		i.  LineFinder::FindAndRemoveLines is called to remove vertical and horizontal line objects from the image.  Line objects are returned
+			as vectors indicating their direction instead.  We also have some specific code to remove the intersections, which are not
+			necessarily identified as being lines by Leptonica operations
+		ii.	Next, we call ImageFind::FindImages to find where images and figures reside within the document.  We do not wish to
+			try and OCR greyscale images and create gibberish and nonsense characters off of pictures.  This function returns a bitmask
+			with the ON bits/pixels being the regions identified as images.
+			I.	First thing we do is reduce the image by a factor of two, a pixel being on in the smaller image if there are any
+				pixels at all on in the original 2x2 area that corresponds to that pixel.
+			II.	Next, we generate a halftone max.  Halftones are that dot shit that are used by printing in order to give the illusion
+				of tones and different greys.  A halftone mask is a set of bits that's on wherever it thinks there's almost definitely
+				some halftone lying around.
+			III.We take the halftone mask, then recplicate it back up to the original image size.
+			IV.	Then, a complicated procedure is undergone, involving a large number of reductions and dilations, and the creation of both
+				a coarse and fine mask, and then a final combination of the image mask with the remover of lines and bars.  The masks are
+				all combined at a scale 1/16th of the image's scale.  They are dilated and then expanded to combine with the halftone mask.
+				Lines were moved earlier, this whole process uses scaling and dilation to remove any line fragments that were connected to
+				images and thus not removed by our previous call to LineFinder::FindAndRemoveLines()
+		iii.We find the connected components of the image within the blocks
+		iv.	We run ColumnFinder::SetupAndFilterNoise to apply the photo mask and get rid of noise (this noise later is possibly owned by
+			the classifier, but for now it is not)
+		v.	Logical OR the music and image masks (They are separate masks, presumably to allow for musical notation identification
+			functionality at some point down the road)
+		vi.	
+
+--- Fill In stuff here ---
+
+7.  TessBaseAPI::Recognize()  [again.  We had a reaaaly long detour, but here we are, fighting and, trying to blah]
+

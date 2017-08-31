@@ -1,0 +1,122 @@
+Notes on how tesseract does it's thing!   Version 2.0
+
+Function calls will be denoted as follows:
+
+FILE_NAME.c [STACK_CALL_COUNT] FUNCTION_NAME(ARGS) 
+
+tesseractmain.cpp	[0]	TessBaseAPI::Init()
+	Here, we're calling Init().  Basically, what happens in this call is that various data structures get initialized, like
+	any necessary underlying classifiers, whatever.  We'll use what's needed
+tesseractmain.cpp	[0] TessBaseAPI::PreloadRenderers()
+	All that is done here is the population of a vector of Renderers with rendering objects (like render to PDF, txt) as
+	decided/designated by command-line options given to tesseract
+tesseractmain.cpp	[0] TessBaseAPI::ProcessPages(image_filename, NULL, 0, renderers[0])
+	This is where the magic happens, this is where all of the work that tessearact does actually happens.  Page layout, OCR,
+	you name it.  And it only takes these few arguments!  NULL is some random "retry_config", and 0 is the timeout.
+baseapi.cpp			[1] TessBaseAPI::ProcessPagesInternal(image_filename, NULL, 0, renderers[0])
+	Prety much just ProcessPages again, the actual one.  A wrapper around it that writes training data to a file
+	in case that we are doing training (which I won't be covering in this runthrough).  There is some code, in the beginning,
+	that handles the case when stdin is itself a stream of filenames.  There is also the case when stdin itself contains binary
+	data.  If this is the case, we assign this binary data to a buffer, find its format, and then send it off to be processed.
+	We also check for multipage TIFFs, which are send to ProcessPagesMultipageTiff.  Elsewise, we call ProcessPage. In short,
+	all we did here was branch out to whether stdin is itself a source of binary data, and to whether we are dealing with
+	multipage TIFF files.  In this runthrough, we are dealing with neither.
+baseapi.cpp			[2] TessBaseAPI::ProcessPage(NULL, 0, filename, NULL, 0, renderer)
+	Filename is where the image itself resides.  The first NULL is a pointer to pix, which hasn't been loaded with the actual iamge yet.
+	This is yet another glorified wrapper.  All it does is check for whether we are not doing OCR and shortcircuts for us if we are not.
+	Elsewise, onto Recognize(NULL) we go [it is NULL because we have no timeout, elsewise a monitoring object would be passed to it]
+baseapi.cpp			[3] TessBaseAPI::Recognize(NULL)
+	This is where the fun begins.  We check to make sure that the internal tesseract_ object has been initialized ( is non-NULL ), and
+	afterwards we call the first major function, FindLines() which, as the name suggest,s does document analysis in order to figure out
+	where the lines are on the text.  (These lines will later be OCR'd)
+baseapi.cpp			[4] TessBaseAPI::FindLines()
+	We first check to make sure a thresholder exists.  The thresholder that Tesseract employs is an Otsu Thresholder.  This thresholder
+	is apparently initialized by the call to SetImage that was done in tesseractmain.cpp .  During the layout determination process, we
+	deal very often with these objects called BLOCKs.  What are they?  They seem to be these objects that, within them, contain text.
+	Wether in the form of images, or in the form of UTF text, that's their job.  They have attributes like size, kerning, sizing, pitch,
+	etc.  I presume these stats are either determined in the layout process or through the classifier.  I believe BLOCKs are hiearchical
+	structures; the whole page is a BLOCK, paragraphs within the block are BLOCKs, down to sentence, word, and the smallest possible
+	BLOCK (I think), the character, with each smaller block in this hiearchy contained within the other.
+	We call InitAdaptiveClassifier which only really loads in the data needed for the adaptive classifier.
+baseapi.cpp			[5] TessBaseAPI::Threshold(Pix** pix)
+	Runs the thresholder on the image.  If an invalid resolution is set, modifies the resolution such that it is valid.  
+thresholder.cpp		[6]	ImageThresholder::TresholdToPix(PageSegMode, Pix**)
+	The PageSegMode argument is never used (Not sure why it'd ever be relevant in the first place, but whatever.)  This wraps the actual
+	doer of work here....
+thresholder.cpp		[7] OtsuThreholdRectToPix(pix_, pix)
+	Not much to say about this function.  It calls a few helpers, but essentially it just does standard Otsu thresholding.
+baseapi.cpp			[5] TessBaseAPI::Threshold() [again]
+	Now, once more we are here.  Tesseract's set_pix_grey class variable is set to the greyscale version of the image that was just
+	thresholded (into a binary image) right now.  We also use an estimated resolutoin as given by the thresholder (how this is deter-
+	mined is beyond me and probably not very important.  We can look at ImageThresholder::GetScaledEstimatedResolution() if we're
+	actually interested in this.)  
+baseapi.cpp			[4] TessBaseAPI::FindLines() [again]
+	Alright!  The image has been successfully Thresholded, via the Otsu method.  Wohoo.  Next big step is page segmentation, and we
+	prepare for that with...
+baseapi.cpp			[5] TessBaseAPI::PrepareForPageseg()
+	This is a very simple function.  It just sets up shirorekha splitting for splitting apart the graphemes of languages like
+	Bengali and Hindi that have that line thing connecting all the graphemes.  Not necessary for latin scripts.
+baseapi.cpp			[4] TessBaseAPI::FindLines() [again2]
+	Here we are once more!  If we are in equation detection mode, we set up equation detection.  If we are only doing OSD (
+	orientation and script detection), then we start up a tesseract instance just for this.  All of that setup and branching
+	has been taken care of, now to the actual segmentation code.
+pagesegmain.cpp		[5] Tesseract::SegmentPage(input_file , blocks, osd_tess , osr)
+	Okay!  So, input_file is pretty self explanatory.  Blocks are a pointer to the BLOCK_LIST contained as part of our tess object,
+	and osd_tess is a pointer to the tesseract engine that was responsible for orientation and script analysis (In our run, this
+	variable will be a NULL pointer.)  We load UNLV zone files if there are any (these are premade blocks used for training, I believe.)
+	Since in our case we do not load such a file, we need to create the preginitor BLOCK!  Before that, though, we start up a 
+	BLOCK_IT iterator object, and add our first block (yay), a new block with all of the variables set to zero, and width and height
+	set to be the entire page (So the entire page is a block, eh.)  We set the text direction, and add it to our BLOCK list!  We create
+	a list of blobs+boxes called diacritic_blobs to hold diacritics, and a list of non-const BLOCKs to_blocks, and pass them into
+	AutoPageSeg!
+pagesegmain.cpp		[6]	Tesseract::AutoPageSeg(pageseg_mode, blocks, &to_blocks, &diacritic_blobs, osd_tess, osr)
+	Not much in the argument list that needs explanation.  In the function body, we define two Pix*, photomask_pix and musicmask_pix.
+	Just as their names suggest, these are bit masks for any images and any muisical notation on the page, respectively.  We also
+	initialize BLOCK and TO_BLOCK lists named found_blocks and temp_blocks, which are passed by reference into the next call which
+	sets up a pointer to a ColumnFinder object named finder.
+pagesegmain.cpp		[7] Tesseract::SetupPageSegAndDetectOreintation(pageseg_mode, blocks, osd_tess, osr, &temp_blocks,
+								&photomask_pix, &musicmask_pix)
+	If you've been paying attention, you know what all of these parameters are.  Anyway, we initialize some TabVector objects here;
+	They're described as objects that hold information about a single vector representing a tab stop or rule line.  They contain
+	information related to page orientation, and a list of blobs associated with the tab, and the kind that it is (left, right aligned,
+	etc. )  There's a list of them, so I guess there's just a lot of lines and tabs to keep... tabs on!  HA.  
+linefind.cpp		[8]	LineFinder::FindAndRemoveLines(source_resolution_, ?? , pix_binary_, &vertical_x, &vertical_y, 
+										music_mask_pix, &v_lines, &h_lines)
+	As the name suggests, this finds and removes lines using leptonica functionality.  All of the output vectors are summed, which gives
+	us the outputs vertical_x and vertical_y, estimating the mean vertical direction.
+linefind.cpp		[9] LineFinder::GetLineMasks(...)
+	Alright!  Ignoring the OpenCL code that doesn't get used, we first do a Closing operation with a pre-given brick sel in order to smoo-
+	then up the image.  We then do an opening with a brick the size of max_line width.  This results in a mask; a mask of shit that's way
+	too wide to ever be a line, so we subtract this closing from the original binary source pix.
+	The next step is to open with horizontal and verical 1 by min_line_length bricks to bring out vertical/horizontal lines.  We also take
+	note of intersections, and create a pix_non_vline mask, that contains non-vertical objects connected to a line.  This is used to eliminate
+	false vertical lines, like potentially vertical lines that break up too easily and vertial lines that don't interact with other lines but
+	meet many non-lines (these ares likely to be underlines or Arabic/Hindi words) (This is done by the interesting function
+	FilterFalsePositives() in linefind.cpp . We undergo the exact same process, but this time for the pix object representing the mask for
+	all of our horizontal lines instead.  We then return both the intersections, nonlines, and lines
+linefind.cpp		[9] LineFinder::FindAndRemoveVLines(resolution, intersections, vertical_x, vertical_y, pix_vline, pix_non_vline,
+											src_pix, TabVector_LIST vectors)
+	This happens right after getting the line masks.  We create objects to hold blobs responsible for objects, namely cryptic sounding
+	line_cblobs and line_bblobs, and then call....
+linefind.cpp		[10]GetLineBoxes(false, *pix_vline, pix_intersections, &line_cblobs, &line_bblobs)
+	Where it says "wpl", that probably means words-per-line, where the words are the amount of l_uint32 that make up one line from the
+	data returned by pixgetData().  We clear out a horizontal line of pixels every kCrackSpacing pixels to break up the vertical lines.
+	Next, we get the invidiual connnected components of these lines.  There's gonna be a lot of them, since we sliced up our lines by
+	removing pixels from them. We then convert these connected component boxes into blobs consisting of just the bounding boxes.  To
+	make sure we don't have garbage, (this happens in ConvertBoxaToBlobs), we stick everything in a BLOCK object the size of the entire
+	page and use its outlines_to_blobs to filter out overlapping and contained objects (bounding boxes), then siphon out the list of blobs
+	and put them into line_cblobs.  We then make our BLOBNBOXes, which are blobs along with a box?  It's simple enough.  We iterate through
+	our blob list (of bounding box-blobs) and pass the blobs to the BLOBNBOX constructor, and toss this newly created blob to the line_bblobs.
+	We also set the blobnbox's number of times it touches an intersection by calling set_line_crossings.  This is apparently a thing.
+	Now, we wanna nab some TabVectors from this now, because why not.
+linefind.cpp		[10]FindLineVectors(bleft, tright(width,height), &line_bblobs, vertical_x, vertical_y, vectors);
+	So, we have to put all the blobs into some AlignedBlob object.  What this thing is essentially one big grid of predetermined length
+	that holds bounding box objects, specifically blobs in this case.  We stick em in there, such that any cells in the grid, vertically,
+	that have bounding box in them have that bounding box added to their list of contained objects.  This is not done horizontally, however.
+	Only the left edge is used as a horizontal position, we don't want to consider the horizontal extent of the lines.  We assume true vertical
+	is given by vector (0,1), and we iterate through the blobs.  FindVertialAlignment loks through the blobs, finds vertical streaks of aligned
+	blobs (at this point they are just the bounding boxes of the vertical line segments) and, and then takes the initial and ending blob
+	trains of aligned (horizontally aligned, because vertial line segments should be vertially aligned, within a certain tolerance) blobs and
+	saves it.  We then check if they're big enough and if they either are of sufficient thinness or cross enough times.  
+	
+
