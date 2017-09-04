@@ -117,6 +117,227 @@ linefind.cpp		[10]FindLineVectors(bleft, tright(width,height), &line_bblobs, ver
 	is given by vector (0,1), and we iterate through the blobs.  FindVertialAlignment loks through the blobs, finds vertical streaks of aligned
 	blobs (at this point they are just the bounding boxes of the vertical line segments) and, and then takes the initial and ending blob
 	trains of aligned (horizontally aligned, because vertial line segments should be vertially aligned, within a certain tolerance) blobs and
-	saves it.  We then check if they're big enough and if they either are of sufficient thinness or cross enough times.  
-	
+	saves it.  We then check if they're big enough and if they either are of sufficient thinness or cross enough times, after which we convert
+	them into TabVector objects.  The true nature of TabVectors is still not known to me, but they have an extent and a vector signifying
+	direction, as well as a list of blobnboxes that correspond to the lines.  Both the vertical and horizontal lines are removed from
+	the pix, and similar enough TabVectors are purged.  Intersection residue is removed from the pix as well.
+linefind.cpp		[8]FindAndRemoveLines (Again...)
+	We run FindAndRemoveHLines, which is just like FindAndRemoveVLines, except that a boolean flag here or there is changed to indicate
+	that the operations we wish to do are for horizontal lines now, we use horizontal sels instead of vertical ones for closings and
+	the such, etc.  It is truly just dual to the previous operations.  INtersections are fattened up and removed, in order to delete any
+	residue; music is removed as well.
+pagesegmain.cpp		[7]SetupPageSegAndOrientation(Again...)
+	Back to setting up page segmentation!  This time, it's time to find images! [woo]
+imagefind.cpp		[8]ImageFind::FindImages(Pix*)
+	To aid in computation, we first reduce the image by a factor of two.  We then obtain a halftone mask from Leptonica, which tells us
+	where halftones (that shit with lots of little dots used to emulate greyscale in newspapers and the like) can be found.  It is a mask,
+	which means it is a binary collection of bits, being on wherever it thinks halftones are to be found.  We fatten up the halftone mask a
+	bit by using it as a seed to fill the original pix and ORing with the mask.  Next, we eliminate lines and bars that were joined to the
+	images and not filtered out earlier (think a circle with a bit of line sticking out of it).  We'll tackle this by creating both a fine
+	and coarse bit mask.  The fine one is started by reducing the halftone mask by 4 levels(1,1,3,3), then using a 5x5 dilation brick 
+	(think smear) on it.  The corase one is produced by reducing the halftone mask by 7 levels(1,1,1,1,3,3,3), dilating it by the same
+	size brick as before (it covers more of the original image and is coarser because we're working at 2^3 as many pixels at once), and then
+	we expand it back up to the same scale as the fine msk.  Both masks are combined, dilated 3x3, expanded back up
+	to regular size, and then combined with the halftone mask to get out final image mask output.
+pagesegmain.cpp		[7]SetupPageSegAndOrientation(Again...2)
+	We run textord_.find_components(), which puts, into the blocks, the outlines nof all of the connected components of things in the image.
+	I don't believe these blocks will have any hiearchical structure on them right now, besides being children blocks of the whole-page block.
+	Next, we initialize a ColumnFinder object, passing in the lines and tabs, resolution
+colfind.cpp			[8]ColumnFinder::SetupAndFilterNoise(PageSegMode pageseg_mode, photo_mask_pix, input_block)
+	First thing we start is initialize a ColPartitionGrid object.  It is of type bounding box grid, a grid object that takes in things that
+	have bounding boxes, in this case, objects of type ColPartition.  What are ColPartitions, though?  Their documentation comments say that
+	they are a partition of a horizontal slice of the page, starting out as a collection of blobs that turn out eventually to be approximate
+	horizontal text lines.  They can also be actual page column partitions.  A new StrokeWidth object is created; strokeWidths are BlobGrids
+	(grids that hold blobs by virtue of them having bounding boxes).  These strokewidth classes hold normal/large blobs, and are used to
+	merge, sort, etc. these blobs into characters, textlines, etc.  We then ReSetAndReFilterBlobs, which just reogranizes the blob list,
+	putting the larger blobs first and then the smaller blobs, grading them by height.  There are four categories of blob: blobs, small_blobs,
+	noise_blobs, and large_blobs.  We next set up block rules and edges by iterating through all our blobs and finding the left/right most
+	tab vectors for them.  TabVectors are sorted by perpendicular distance from the global mean vertical vector and may have differing
+	directions, so thus we need to search through them.
+strokewidth.cpp		[9]StrokeWidth::SetNeighboursOnMediumBlobs
+	Alright, we need to organize the blobs corresponding to the connected components we found earlier (these are proto-letters, presumably).
+	We insert all of the blobs into the StrokeWidth blob grid, and iterate through them calling the SetNeighbours function.  It itself
+	calls FindGoodNeighbour on each blob, which first filters out any line objects, then does a BlobGridSearch on the strokewidth object
+	itself (which just had all these letter outline blobs thrown into it).  Likelihood of a blob being a neighbor is graded on whether
+	stroke widths match, how much overlap their blobs have, and the gapb etween the letters.  This is used to decide on the best neighbor
+	in every direction, after which each blobs has its set_neighbor() function called on it to set the right blob as a neighbor in the
+	given direction, done 4 times for each blob for each cardinal direction.  This is only done on the medium size blobs.
+colfind.cpp			[8]SetupAndFilterNoise(Again...)
+	Back to SetupAndFilterNoise we go!  The stroke_width_ grid is cleared of blobs placed in it and we create a new grid of blobs, this one
+	called CCNonTextDetect, whose purpose is to, predictably enough, use grid-based operations on blob to create an image mask that's
+	better for detecting line-drawins, graphs, and charts as opposed to the halftone masks' specialites.  We then run CCNonTextDetect::
+	ComputeNonTextMask, and it follows a familar patter.  We populate the blob list, except with small and noise blobs this time, along with
+	lonely medium blobs either without a good strokewidth neighbor(as determined earlier), or with too small a perimeter-to-area ratio.
+	Medium blobs that don't make it to the nontextDetect's blob grid, are put in an auxiliary good_grid list instead.  We produce a grid
+	of ints, iterating through it to set it.  Each cell has a noise_density value given by how many neighbors (consisting of non good-text 
+	blocks) it has.  If the blob is within/intersects the image mask, then you increase the noise score of it.  If it's too noisy but is 
+	within a certain maximum still and has good blobs nearby, then the cell is makred has having a noise density of 0.  This grid of
+	noise densities is then thresholded to a pix mask, with pixels set to ON corresponding to areas of density over max_noise_count_.
+ccnontextdetect.cpp	[10]MarkAndDeleteNonTextBlobs(large_blobs, max_overlaps, , , nontext_mask)
+	Alright!  We cheek each individual blob to see if its noise density is over a certain point (if over half of the blob's bounding-box
+	pixels are over a threshold) and if the blob overlaps with too many neighbors (threshold: max_blob_overlaps=kMaxLargeOverlapsWithSmall),
+	then we know it might be a nontext block.  If the nontext block has noise density zero anywhere (the density that was determined earlier),
+	then maybe it has text nearby.  In this case, we dont' add the whole blob bounding box to the nontext_mask, but only the outline, so we
+	don't clip out text.  Otherwise, we set the whole bounding box to ON in the nontext_mask
+colfind.cpp			[9]ComputeNonTextMask()
+	Some of the description in the previous SetupAndFilterNoise was actually belonging to this function call... sorry for the confusion.
+	The previous func call is actually also part of this function.  So, we just got off of getting rid of large blobs.  We give now the
+	"blobs" blobs the exact same treatment.  We then clear the CCNonTextDetect blob grid, toss in the medium blobs (previously it had small,
+	noise blobs), then mark large_blobs again for deltion as before, just with mediums in the grid instead.  We clear one last time,
+	and finally run it once last time, for small, noise, and medium blobs, but without consideration towards overlap, only off of
+	noise density.
+colfind.cpp			[8]SetupAndFilterNoise(Again...2)
+	Cool!  We are once again @ blob central.  We call FindTextlineDirectionAndFixBrokenCJK, which fixes up any broken cjk stuff via a call to
+	FixBrokenCJK(), then calls FindTextlineFlowDirection from within, which figures out whether our text (blobs) is vertical
+	or horizontal by inspecting a blob's first and second order neighbors.  We start by setting neighbors (they were cleared during the blob
+	massacre comitted by MarkAndDeleteNontextBlobs).  We then refine this to either be vertical or horizontal, then smooth it out, settling
+	blobs to either be horizontal or vertical.  We then clear the stroke_width_'s grid and return!
+pagesegmain.cpp		[7]SetupPageSegAndOrientation(Again...3)
+	Actually, nothing is done here unless you need OSD or equation detection
+pagesegmain.cpp		[6]AutoPageSeg(Again...2)
+	Back to AutoPageSeg we go!  If there is a musicmask_pix, we do stuff with it, and if we need to detect equations we run
+	SetEquationDetect.  ColumnFinder is back at it again, except this time we call FindBlocks
+colfind.cpp			[7]FindBlocks()
+	First thing we do is logical OR the photo_mask_pix with the recently constructed nontext_map_, so that now it has even better
+	coverage than before.  
+strokewidth.cpp		[8]FindLeadersAndMarkNoise()
+	This tosses Leaders (those dots connecting items on tables of contents)
+	into small_blobs, and anything else in small_blobs into the medium blobs (blobs).  You find the leader candidates by doing a GridSearch,
+	and looking for horizontally aligned sets of blobs, then testing for them to be similar and monospaced (this is all done by
+	FindLeadersAndMarkNoise() ).  Next, we toss in medium blobs into the StrokeWidth's object (non leader mediums, at least), and
+	iterate through them.  IF they are to the left or to the right of a leader, they are marked LR_LEFT ( or LR_RIGHT, respectively ).  
+	The leader blocks get put back into the grid
+strokewidth.cpp		[8]RemoveLineResidue(&big_parts_)
+	This is called immediately after the last function.  We do a BlobGridSearch through all of our wonderful blobs, scrutinizing any of them
+	that have an aspect ratio that is very line-like (determined using kLineResidueAspectRatio). We then search the neighborhood of these
+	thin-priveleged blobs for the biggest blob buddies.  If one is not found that is big enough (determined by kLineResidueSizeRatio), then
+	we add this bbox to the big_part_list passed in by reference
+tabfind.cpp			[8]FindInitialTabVectors
+	We put the medium blobs (just called blobs) into the grid, and call FindAllTabVectors, along with the minimal gutter width given by
+	variable min_gutter_width_.  
+tabfind.cpp			[9]FindTabBoxes
+	We gridsearch through the grid, iterating through every BBOX.  Centered on each one of these BBOXes, we
+	then do a radsearch starting at each one of these boxes in TabFind::TestBoxForTabs, of radius depending on variable kTabRadiusFactor.
+	A box can be a tab if either no blobs are in the gutter during radial search, or if they're in the gutter only above or only below
+	with aligned objects on the opposite side; more aligned objects above count positively towards tab possibility, unaligned less. This
+	is all done in a call to TestBoxForTabs, if it turns out to be a tab, then add it to left_tab_boxes_ or right_tab_boxes, respectively.
+	We sort the left and right tab boxes by the outermost ones first.	
+tabfind.cpp			[9]FindAllTabVectors()
+	We iterate through the right_tab_boxes_ and left ones, looking for tab vectors inside each of them.  The first few we find are used
+	to set a better estimate of the true vertical direction than (0,1).  We then use this vertical_x and vertical_y for a true TabVector
+	search, using the same criteria as before where we want aligned sets of blobs.  The purpose of what was done before was to get a closer
+	estimate of true alignment beofre doing this, so that FindTabVectors does not struggle with seriously misalignment.  IT looks for
+	blobs in a row/column as it did before and uses the last/first one to create a TabVector.  All of these are added to the internal variable
+	vectors_ and are averaged to then produce a predicted vertical.  This new predicted vertical is then used to realign all the tabs,
+	and resort them.
+tabfind.cpp			[9]MergeSimilarTabVectors
+	We are looking to see if tabvectors are on the same side, overlap, or close enough to each other to be merged.  If this is the case,
+	(as determined by TabVector::SimilarTo), then we merge them, through their MergeWith function.  Pretty much just means that you collect
+	all the blobs together and make a bigger bounding box.  
+tabfind.cpp			[8]FindInitialTabVectors(Again...2)
+	We now SortVectors() which is literally just sorting the internal vectors_ class variable.  EvaluateTabs(), a wrapper for the
+	fiendishly ccomplicated TabVector::Evaluate which prunes the blobs on the TabVector object, and recalculates the alignment if necessary,
+	given the fact that we have a new vertical and all that was just calculated.  Vertical text is marked as such if it can be, on the basis
+	of our previous alignment of the blobs.  A lot of the complexity behind this process has been hidden and not gone into detail.
+colfind.cpp			[7]SetBlockRuleEdges(input_block)
+	This function encapsulates the very simple functionality of calling SetBlobRuleEdges on all of the four blob categories; medium(just blob),
+	small, noise, and large.  We iterate through tabs in TabFind::LeftTabForBox, finding the rightmost tab vector that overlaps and is
+	sufficiently to the left, then setting the block's vector to be that.
+strokewidth.cpp		[7]GradeBlobsIntoPartitions
+	Alrighty!  here, we will type the blobs as eithe rvertical/horizontal/non text and stick them into ColPartitions.  First job is to
+	clear the StrokeWidth blob grid and reinsert blobs into them; they have tab stops now, though, which is pretty neat.  We use first
+	and second order neighbors in order to set vert_possible / horiz_possible flags for each blobnbox in the StrokeWidth grid (See earlier
+	for a description ofh ow this works).  Then, within GradeBlobsIntoPartition, we create a TextlineProjection object.  Its purpose is
+	to encapsulate the computation of an image representing textline density, the idea being if you smear horizontally the connected
+	components of an image, the new ccs are the texlines.  
+textlineprojection.cpp [8]ConstructProjection()
+	Now, our job is to buildup the projection used to determine textline density (and probably the actual textlines themselves).  First thing,
+	we create an image_box that bounds the nontext_map.  We delete any old internal pix_ object (the previous smeared image),
+	and initialize a fresh one with 8 bit color depth.  The medium and large blobs are now passed (through independent calls) into
+	ProjectBlobs.  What is done here is that the blob bounding boxes are padded horizontally with a scaling factor proportional to height given
+	by kOrientedPadFactor.  We also extend it vertically a bit, but not enough to smear multiple textlines together.  We also make sure to not
+	overrun our tabs.  Overlap- with the nontext_map is removed; texlines shouldn't smear into image areas.  We then build up the smeared
+	pix_ object through IncremenetRectangle8Bit; essentially for each of these horizontally expanded bounding boxes, we augment pixels inside
+	each bbox in the pix_ by one.  The bit depth is 8, so we can augment up to 255;  The bit depth thus contains how many horizontally expanded
+	bboxes intersect with that given pixel.  Finally, we convolve the pix_ with a 3x3 brick to further smear out detail.
+strokewidth.cpp		[7]GradeBlobsIntoPartitions(Again...2)
+	Alright, the next job is to run MoveNonTextlineBlobs, which purges medium & large blobs of blobs that don't seem to sit well on a textline,
+	so that diacritics don't form their own little text lines. having removed these blobs, we then clear the blobs in StrokeWidth's grid,
+	insert these new blobs, set their text line direction with FindTextlineFlowDirection, and we call what's likely to be a huge function...
+strokewidth.cpp		[8]StrokeWidth::FindInitialPartitions
+	We need to create our partitions.  Chains of text are discovered and accumulated, and blobs that don't belong to one are moved.  We are
+	only dealing with horizontal text chains, so first thing we do is run...
+strokewidth.cpp		[9]StrokeWidth::FindHorizontalTextChains(part_grid)
+	A grid search through all of the strokewidth's blobgrid's blobs starts this function off.  We chech each BLOBNBOX from the search to see
+	if it is horizontal and if it has an unused neighbor to the right, in which case we start a partition and add both blobs to it; we keep
+	adding blobs to the right until we arrive at a blob that has no free right-neighbors.  Once we ran out of right-partners, we then move
+	leftwards from the initial blob (from the gridsearch), and add left-neighbors in the same fashion.  We then finish things off with
+	a call to CompletePartition.  This function itself calls ColPartition->ComputeLimit(), which sets the value of several bounding boxes,
+	key values, and other internal variables, like the medians.  It uses the horizontal and vertical gradients at the edges of the bounding
+	boxes of the colPartitions to determine how horizontal/vertical the partition is.  This is combined with other metrics to set the internal
+	flow_, blob_type.  The flow can be nontext (probably not text), neighbors, chain, strong chain, depending on how good it is.  This now
+	complete partition is inserte dinto the part_grid.
+colpartitiongrid.cpp	[9]Colpartitiongrid::SplitOverlappingPartition(big_parts)
+	Okay.  It's sometimes due to skew or maybe due to drop caps or whatever, but we excise blobs that cause overlaps into individual
+	partitions and the big_parts list.  The amount of overlap allowed is controlled by kTinyEnoughTextlineOverlapFraction.  We start, once
+	more, with a gridsearch into the ColPartitionGrid.  Remember, this grid has partitions, not blobs.  On each colpartition, we then
+	do a radial search based on it and iterate through all the neighbors of the partition found by the radial search.  If a neighbor
+	overlaps sufficiently such that it could be merged, then we leave it alone.  If removing the biggest box from the union of both the
+	partition and it's partner partition eliminates oberlap and is pretty big, then it's a dropcap or join or whatever, and we can
+	toss it into the big_parts list, bigness determined through the kBigPartsSizeRatio variable/parameter.  
+strokewidth.cpp		[8]FindInitialPartitions
+	EasyMerges is now called, to do harmless partition merges.  RemoveLargeUnusedBlobs Iterats through all of the large blobs and
+	turns them into their own Colpartitions, and then tosses those into big_parts.  We then repeatedly run part_grid->GridSmoothNeighbors,
+	which looks at local neighbors for each blobnbox, and if a majority of neighbors have a certain type, then it is set to that type.  This
+	is run to spread out the text types until nothing is changed.  Afterwards, ComputeTotalOverlap is used to find the total overlap.
+strokewidth.cpp		[9]TestDiacritics
+	Alright!  Time to handle diacrtics.  First things first, we create a BlobGrid and toss intot his grid both the noise blobs and
+	medium blobs; these are the medium blobs that haven't been tossed into a colPartition yet, I believe.  We iterate through all these
+	smaller blobs and Run DiacrticticBlob.  We set up a rectangle search around each of these candidate diacrictic blobs, selecting the
+	one with best x and y overlap, weighted by the kDiactrictic X and Y PadRatios, and with a sufficient size difference, controlled
+	by the parameter kMinDiacriticSizeRatio.  We also ensure that merging diacritic blobs doesn't violate tabs.  If all the criteria are
+	met, then the best one meeting these criteria is passed to the diacritic blob's set_base_char_blob method.  We then iterate through
+	blobs in small partitions.  If These small partitions conist only of qualifying blobs, then we liberate all blobs from this small
+	partition and merge them with their base character partitions instead.  
+strokewidth.cpp		[8]FindInitialPartitions
+	The remaining blobs are then tossed into ColPartitions, and we again split off characters from partitions when doing so resolves
+	overlap vetween the partitions.  Once more, we do EasyMerges, but this time with these larger blobs as opposed to the earlier
+	small or noise blobs.  We also, once more, propagage BTFT_CHAIN and BTFT_NEIGHBOURS through the grid, and we are done!
+colfind.cpp			[6]FindBlocks(Again...)
+imagefind.cpp		[7]FindImagePartitions()
+	Lets go lets go lets go lets go!!!   Alright, first comes a call to ConnCompAndRectangularize.  We pass in image_pix, and also
+	pass in by reference a boxa and pixa pair.  The boxa is initially populated with the 8-way connected components of the image
+	mask.  If these are nearly rectangular, then we replace the boxa with a new one representing the new rectangular region, along with
+	the pixa, which was the old connected region, being updated to be just a simple rectangular black region of the same size.  We then
+	iterate through all of these rectangularized boxes.  DivideImageIntoParts is called on each one of them; it cuts up the bounding
+	box of the image component so that it doesn't intersect the image unless it's strong fully-contained horizontal text within the image.
+	This can be accomplished by iterating through all of the horizontal partitions we created earlier.  Image partitions that are fully
+	text-covered are just annihalated.  When intersections happen, we eat a chunk out of the image partition, and add some padding to the
+	chunk for good measure, so enuough is eaten out. Image partitions are then expanded as much as possible without running into text.
+	We also delete small images and weak partitions.
+colfind.cpp			[6]FindBlocks()
+	Back here again, we do a simple transfer of all of the image partitions to the photo_mask_pix, and delete all of these garbage
+	image partitions from the fiel, before running FindImagePartitions once more with the same arguments as before, which now finds
+	less overlapping and broken up regions.  Large text-like blobs are sent to medium blobs, and medium blobs superseded by image blobs,
+	of which there are more now, are deleted.  StrokeWidth has done its job, so it is deleted.  We then call SetBlockRuleEdges once more;
+	we have changed the list of blocks, so we update to make sure all is as it should be.
+colfind.cpp			[7]ColumnFinder::MakeColumns(false)
+	WE will iterate through the entire page, going up(or down, not sure) through every row of the ColumnFinder grid.  MakeColpartSets populates
+	the PartSetVector by first starting a ColPartition_LIST, which consists of ColPartitionSets at each y-value on the page, with each
+	ColPartitionSet filled with all the ColPartitions with bottom edges at that y-value and blobs that are not noise nor singletons.  We
+	Then iterate through the PartSetVector, through all of the y values, calling LegalColumnCandidate() on each colPartitionSet, which
+	checks to ensure it contains legal individual partitions and no overlaps.  Each of these column candidates are added to column_sets_.
+	The possibility of a single column is also added to the column_sets_, just in case.  Finally, we call AssignColumns to get the final
+	column assignments (resonable ones), and afterwards we compute the mean column gap.
+colfind.cpp			[6]FindBlocks()
+	We clear the gird, then insert into the grid the image bblobs and then the regular blobs and... god just insert extra nonsense that
+	FindBlocks() goes through here.  There is just an ungodly amount of code employed to do even the most mundane shit, good lord.  And it's
+	not even written in c++11, and the design is just labrinthe... there's so much code, if all of these for loops were more simply done,
+	it could b emore tolerable but right now, it's just ridiculous.  Especially how it just calls all of these custom made functions with
+	odd design patterns and names and modes of usage, commentary is sparse, it's just awful.  
+
+
+... [Going waaaaaay up, because fuck all of that shit]
+
+baseapi.cpp			[3]TessBaseAPI::Recognize1
 
