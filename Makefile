@@ -19,7 +19,7 @@ logging_test: bin/logging.o bin/logging_test.o
 	$(CC) $(CFLAGS) bin/logging.o bin/logging_test.o -o bin/logging_test -DBOOST_LOG_DYN_LINK $(LOG_LDFLAGS)
 
 api_fetch: bin/api_fetch.o bin/logging.o
-	$(CC) $(CFLAGS) bin/logging.o bin/api_fetch.o -o bin/api_fetch -DBOOST_LOG_DYN_LINK -lcurl $(LOG_LDFLAGS)
+	$(CC) $(CFLAGS) bin/logging.o bin/api_fetch.o -o bin/api_fetch -DBOOST_LOG_DYN_LINK $(LOG_LDFLAGS) -lcurl
 
 
 bin/logging_test.o: tests/logging_test.cpp include/logging.hpp
@@ -29,7 +29,7 @@ bin/logging.o: src/logging.cpp include/logging.hpp
 	$(CC) $(LOG_CFLAGS) -o bin/logging.o src/logging.cpp -DBOOST_LOG_DYN_LINK $(LOG_LDFLAGS)
 
 bin/api_fetch.o: src/api_fetch.cpp include/logging.hpp
-	$(CC) $(TESS_CFLAGS) -o bin/api_fetch.o src/api_fetch.cpp $(TESS_LIBS) $(TESS_LDFLAGS)
+	$(CC) $(LOG_CFLAGS) -o bin/api_fetch.o src/api_fetch.cpp -DBOOST_LOG_DYN_LINK $(LOG_LDFLAGS) -lcurl
 
 clean:
 	\rm -f bin/*
