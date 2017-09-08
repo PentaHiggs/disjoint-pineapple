@@ -3,6 +3,7 @@
 // STD includes
 #include <ostream>
 #include <fstream>
+#include <mutex>
 
 // Boost includes
 #include <boost/date_time/posix_time/posix_time_types.hpp>
@@ -52,6 +53,21 @@ static void my_formatter(logging_::record_view const& rec, logging_::formatting_
 
 void loglib::init()
 {
+	/* static (locally namespaced global) variables
+	 * Forgive me father, for I have sinned */
+	static bool run_yet(false);
+	static std::mutex mut_;
+
+	// TODO: does std::mutex mut_ and the static bool have to be atomic or something to avoid
+	// difficult to resolve bugs?
+	std::unique_lock<std::mutex> lock(mut_);
+	if (run_yet) {
+		return;	// Don't need to run it again
+	} else {
+		run_yet = true;
+		lock.unlock();
+	}
+	// No thread will make it this far besides the first; we are safe here.
     typedef sinks::synchronous_sink< sinks::text_ostream_backend > text_sink;
     boost::shared_ptr< text_sink > sink = boost::make_shared< text_sink >();
 

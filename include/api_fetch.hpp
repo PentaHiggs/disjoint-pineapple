@@ -15,7 +15,7 @@ class ApiFetch {
 	private:
 		CURL* conn_;
 		loglib::logger lg_;
-		string errorBuffer;
-		static size_t writer(char*, size_t, size_t, std::string);
+		std::string errorBuffer;
+		static size_t writer(char*, size_t, size_t, std::string*);
 };
 #endif //API_FETCH_H

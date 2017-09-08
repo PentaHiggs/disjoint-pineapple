@@ -12,19 +12,6 @@ using std::endl;
 using std::string;
 using loglib::debug;
 
-class ApiFetch {
-	public:
-		ApiFetch();
-		~ApiFetch();
-		bool init();
-		bool fetchUrl(string* buffer, string URL);
-	private:
-		CURL* conn_;
-		loglib::logger lg_;
-		string errorBuffer;
-		static size_t writer(char* data, size_t size, size_t nmemb, string* writerData);	
-};
-
 size_t ApiFetch::writer(char* data, size_t size, size_t nmemb, string* writerData)
 {
 	if(writerData == NULL)
@@ -44,8 +31,8 @@ ApiFetch::~ApiFetch() {
 bool ApiFetch::init() {	
 	CURLcode code;
 	conn_ = curl_easy_init();
-	lg_ = loglib::logger();
 	loglib::init();
+	lg_ = loglib::logger();
 	
 	
 	if(conn_==nullptr) {

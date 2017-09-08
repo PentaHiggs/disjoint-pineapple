@@ -1,5 +1,9 @@
+#ifndef LOGGING_HPP_
+#define LOGGING_HPP_
+
 #include<boost/log/trivial.hpp> /*< Severity level and severity logger get imported from here */
 #include<boost/log/utility/manipulators/add_value.hpp> /*< Needed for EZ_LOG definition */
+#include<iostream>
 
 #define EZ_LOG(log_, sv) BOOST_LOG_SEV( log_, sv) \
 	<< boost::log::add_value("Line", __LINE__)     \
@@ -27,3 +31,5 @@ namespace loglib {
 	 */
 	typedef boost::log::sources::severity_logger<severity_level> logger;
 }
+
+#endif //LOGGING_HPP_
