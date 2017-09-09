@@ -53,13 +53,10 @@ static void my_formatter(logging_::record_view const& rec, logging_::formatting_
 
 void loglib::init()
 {
-	/* static (locally namespaced global) variables
-	 * Forgive me father, for I have sinned */
+	// Statics are initialized in a thread-safe manner since c++11, this is OK
 	static bool run_yet(false);
 	static std::mutex mut_;
 
-	// TODO: does std::mutex mut_ and the static bool have to be atomic or something to avoid
-	// difficult to resolve bugs?
 	std::unique_lock<std::mutex> lock(mut_);
 	if (run_yet) {
 		return;	// Don't need to run it again

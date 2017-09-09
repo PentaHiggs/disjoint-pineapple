@@ -8,6 +8,9 @@
 #include<condition_variable>
 #include<climits>
 
+
+namespace util {
+
 typedef std::unordered_map<std::string, std::string> dict;
 
 // Implements a thread-safe queue of limited length
@@ -109,4 +112,5 @@ bool SharedQueue<T>::empty() {
 	mlock.unlock();
 	return empty;
 }
+} // namespace util
 #endif // UTIL_HPP_
