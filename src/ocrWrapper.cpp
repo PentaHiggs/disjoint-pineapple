@@ -1,5 +1,7 @@
 #include <string>
 #include <memory>
+#include <fstream>
+#include <iostream>
 #include <tesseract/baseapi.h>
 #include <tesseract/renderer.h>
 #include <leptonica/allheaders.h>
@@ -11,7 +13,7 @@ using loglib::debug;
 
 // Helper function for searching in a dictionary for a value with key std::string string.
 // Returns std::string default_string if such a value does not exist.
-std::string getStringFromDict (const std::string &string, const dict &dictionary, const std::string &default_string = "") {
+std::string getStringFromDict (const std::string &string, const util::dict &dictionary, const std::string &default_string = "") {
 	auto found_string_it = dictionary.find(string);
 	if (found_string_it != dictionary.end()) // Means that the setting exists
 		return found_string_it->second;
@@ -19,8 +21,22 @@ std::string getStringFromDict (const std::string &string, const dict &dictionary
 		return default_string;
 }
 
-OcrWrapper::OcrWrapper(dict* settings) : has_been_initialized_(false),
-	settings_(settings) {}
+// Writes the strBuffer to a file, with given filename
+void writeBufferToFile(std::string* strBuffer, std::string filename) {
+	std::ofstream file;
+	file.open(filename, std::ios::binary | std::ios::out | std::ios::trunc);
+	file.write(strBuffer->c_str(), strBuffer->size());
+	file.close();
+}
+
+// Constructor.
+// I understand this copying of settings dicts is inefficient, but
+//	1. OcrWrapper objects wrap heavy processes that take lots of computation
+//	2. Settings dictionaries are small
+// Hence, although this is slow, we are initializing heavy objects of which there
+// should not be very many, so it is acceptable.
+OcrWrapper::OcrWrapper(util::dict settings) : has_been_initialized_(false),
+	settings_(new util::dict(settings)) {}
 
 // Searches internal settings dictionary for a specified setting, returning it
 // If Setting cannot be found, default_string is returned in its place.
@@ -46,6 +62,9 @@ int OcrWrapper::classifyFile(std::string *buffer, std::string name) {
 		name += std::to_string(total_pages_rendered_);
 	}
 
+	// Save file in output directory
+	name.insert(0,  "outputs/");
+
 	// Passing in name.c_str() is OK; renderer is killed before string goes out of scope
 	std::unique_ptr<tesseract::TessResultRenderer> renderer(
 		new tesseract::TessTsvRenderer(name.c_str()));
@@ -58,16 +77,25 @@ int OcrWrapper::classifyFile(std::string *buffer, std::string name) {
 	// TODO(andy): Move renderer initialization and closing to constructor and destructor, maybe? 
 	const unsigned char* data = reinterpret_cast<const unsigned char*>(buffer->c_str());
 	Pix *pix = pixReadMem(data, buffer->size());
+
+	if (!pix) {
+		EZ_LOG(lg_, debug) << "Pix loading failed.  Saving binary as " << name << ".jpg" << std::endl;
+		writeBufferToFile(buffer, name+".jpg");	
+	}
 	if(!api_.ProcessPage(pix, 0, "", NULL, 0, renderer.get())) {
 		EZ_LOG(lg_, debug) << "Page processing failed";
 		return -1;
-	}	
-	pixDestroy(&pix);
+	}
+	if(pix) {
+		pixDestroy(&pix);
+	} else {
+	}
 	if(!renderer->EndDocument()) {
 		EZ_LOG(lg_, debug) << "Renderer destruction failure";
 		return -1;
 	}
-	++total_pages_rendered_; // Even if function call was not successful.
+	std::cout << "Successfully ocr'd " << name << std::endl;
+	++total_pages_rendered_;
 	return 0;
 }
 
@@ -125,7 +153,8 @@ int OcrWrapper::init() {
 
 	// OEM_TESSERACT_LSTM_COMBINED uses LSTM, but falls back on old TESSERACT if it struggles
 	int failure = api_.Init(tessdata_parent_dir_.c_str(), language_.c_str(),
-			tesseract::OcrEngineMode::OEM_TESSERACT_LSTM_COMBINED);
+			tesseract::OcrEngineMode::OEM_LSTM_ONLY);
+			//tesseract::OcrEngineMode::OEM_TESSERACT_LSTM_COMBINED);
 
 	if (failure) {
 		EZ_LOG(lg_, debug) << "Tessearct Failed to Init().  Aborting initialization";

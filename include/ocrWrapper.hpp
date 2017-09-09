@@ -29,12 +29,12 @@ class OcrWrapper {
 		//	Example of settings usage:
 		//	dict settings = {{"Language", "eng"},{"Session Name","thisSetting"}}
 		//
-		OcrWrapper(dict* settings);
+		OcrWrapper(util::dict settings);
 		
 		// Iterates through settings given in, and individually modifies interal settings_
 		// to match. Does not replace nor delete internal settings_, only updates (or creates)
 		// key-value pairs in settings_.
-		void changeSettings(dict* settings);
+		void changeSettings(util::dict* settings);
 
 		// Helper method that returns a value if the key std::string is in settings_, elsewise
 		// it returns the default_string given
@@ -54,7 +54,7 @@ class OcrWrapper {
 
 	private:
 		bool has_been_initialized_;
-		std::unique_ptr<dict> settings_;
+		std::unique_ptr<util::dict> settings_;
 		loglib::logger lg_;
 		tesseract::TessBaseAPI api_;
 		std::string currentFile_;
