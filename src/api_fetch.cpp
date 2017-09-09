@@ -2,6 +2,9 @@
 #include<iostream>
 #include<curl/curl.h>
 #include<memory>
+#include<chrono>
+#include<thread>
+
 #include"logging.hpp"
 #include"api_fetch.hpp"
 
@@ -88,6 +91,10 @@ bool ApiFetch::fetchUrl(string* buffer, string URL) {
 	if(code != CURLE_OK) {
 		EZ_LOG(lg_, debug) << "cURL file download from URL" << URL << "failed";
 	}
+
+	// Hackish way to space out requests
+	// TODO(andy): Keep an internal timer that can be set via some setting to space out requests
+	std::this_thread::sleep_for(std::chrono::milliseconds(5000));
 	return true;
 }
 
