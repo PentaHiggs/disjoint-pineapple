@@ -19,13 +19,18 @@ using std::string;
 // Include this file in order to use GlobalDawgCache()
 ///#include <tesseract/dict.h>
 #include <tesseract/publictypes.h> // Include this in order to get access to tesseract settings enums
-#include<boost/date_time/gregorian/gregorian.hpp>
+#include <boost/date_time/gregorian/gregorian.hpp>
 
 using std::cout;
 using std::cerr;
 using std::endl;
 using std::string;
+
 using loglib::debug;
+
+using boost::gregorian::date;
+using boost::gregorian::days;
+using boost::gregorian::from_simple_string;
 
 // Simple struct holding both a string buffer and a name
 struct bufferStruct {
@@ -49,22 +54,22 @@ struct bufferStruct {
 // Function that runs_ocr on elements from a SharedQueue of buffers.
 // Keeps asking for elements from buffer_queue.dequeue(), until it receives
 // an empty smart pointer, after which the function terminates.
-void buffer_muncher(SharedQueue< std::unique_ptr<bufferStruct> > *buffer_queue, int pid) {
+void buffer_muncher(util::SharedQueue< std::unique_ptr<bufferStruct> > *buffer_queue, int pid) {
 	loglib::init();
-	loglib::logger lg_();
-	dict settings{};
-	OcrWrapper ocr(&settings);
+	loglib::logger lg_;
+	util::dict settings = {{"dummy_setting","meow"}};
+	OcrWrapper ocr(settings);
 	ocr.init();
 	// Keep munching buffers until you get a nullptr
 	while (true) {
 		// Following function will wait on buffer_queue to have bufferStruct elements to munch
 		std::unique_ptr<bufferStruct> buffer_struct_ptr = std::move(buffer_queue->dequeue());
 		if (!buffer_struct_ptr->kill_muncher) {
-			assert(buffer_struct_ptr->buffer);	// Pointer should not be empty.
+			assert(buffer_struct_ptr->buffer->size() > 0);	// Pointer should not be empty.
 			ocr.classifyFile(buffer_struct_ptr->buffer.get(), buffer_struct_ptr->name);
-			//EZ_LOG(lg_, loglib::debug) << "Munched " << buffer_struct_ptr->name;
+			EZ_LOG(lg_, loglib::trace) << "Munched " << buffer_struct_ptr->name;
 		} else {	// we kill the muncher.
-			//EZ_LOG(lg_, loglib::debug) << "Shutdown order received @ muncher " << pid;
+			EZ_LOG(lg_, loglib::trace) << "Shutdown order received @ muncher " << pid;
 			return;
 		}
 	// buffer_struct object naturally deallocated here, along with its buffer and name
@@ -72,34 +77,61 @@ void buffer_muncher(SharedQueue< std::unique_ptr<bufferStruct> > *buffer_queue, 
 	return;
 }
 
+// Parses the input in order to determine start and end dates, expecting input
+// of the form YYYY-MM-DD, e.g. 1840-12-29
+// If this parsing fails, returns false.  Else, returns true
+bool parse_input(date& start_date, date& end_date, std::string& start_date_str,
+		std::string& end_date_str, int argn, const char**& argv) {
+	if (argn != 3) {
+		return false;
+	}
+	try {
+		start_date = from_simple_string(argv[1]);
+		end_date = from_simple_string(argv[2]);
+	} catch (...) {
+		return false;
+	}
+	if (start_date.is_not_a_date() || end_date.is_not_a_date() ) 
+		return false;
+	return true;	
+}
+
 int main(int argn, const char** argv) {	
 	loglib::init();
-	loglib::logger lg_();
+	loglib::logger lg_;
+	
+	date start_date;
+	date end_date;
+	std::string start_date_str;
+	std::string end_date_str;
 
-	using namespace boost::gregorian;
-	const string start_date_str("1935-09-09");		// Start Date
-	const string end_date_str("1935-09-20");		// End date
+	if (!parse_input(start_date, end_date, start_date_str, end_date_str, argn, argv)) {
+		return false;
+	}
+	
+	/***********************  Main Control Variables ************************/
+	const int num_ocr_instances = 4;			// Number of OCR instances to run.  Should equal number of cores on machine
+	const int buffer_queue_max_size = 2;		// Doesn't need to be very large.  Increase if internet connection is unreliable
+	const int num_pages_to_classify = 2;		// How many pages deep to go into every daily issue
 
-	const date start_date(from_simple_string(start_date_str));
-	const date end_date(from_simple_string(end_date_str));
-
-	const int buffer_queue_max_size = 2;		// Doesn't need to be very large.
-	SharedQueue< std::unique_ptr<bufferStruct> > buffer_queue(buffer_queue_max_size);
-
-	const int num_ocr_instances = 4;				// Number of OCR instances.  Increase if cores > 4
+	util::SharedQueue< std::unique_ptr<bufferStruct> > buffer_queue(buffer_queue_max_size);
+	
+	util::dict dictionary;
 	std::vector<std::thread> ocr_threads;
 	for(int i = 0; i < num_ocr_instances; ++i) {	
-		ocr_threads[0] = std::thread(buffer_muncher, &buffer_queue, i);
+		ocr_threads.push_back( std::thread(buffer_muncher, &buffer_queue, i) );
 	}
 
 	ApiFetch urlFetcher = ApiFetch();
 	urlFetcher.init();
 	
-	const int num_pages_to_classify = 4;		// How many pages deep to go into every daily issue
+
 	std::stringstream strBuilder;
-	for(date curr_date = start_date; curr_date != end_date; curr_date += days(1)) {
+	for(date curr_date = start_date; curr_date <= end_date; curr_date += days(1)) {
 		for(int i = 1; i <= num_pages_to_classify; i++) {
 			// Build up URL to then fetch with cURL
+			strBuilder.str("");
+			strBuilder.clear();
 			strBuilder << "http://archives.chicagotribune.com/";
 			strBuilder << curr_date.year() << "/";
 			strBuilder << std::setfill('0') << std::setw(2);
@@ -107,16 +139,26 @@ int main(int argn, const char** argv) {
 			strBuilder << std::setfill('0') << std::setw(2);
 			strBuilder << curr_date.day() << "/";
 			strBuilder << "page/";
-			strBuilder << i << "/large.jpg";
+			strBuilder << i << "/xxlarge.jpg";
 
 			std::string url;
 			strBuilder >> url;
-		
+			
 			std::unique_ptr<std::string> buffer(new std::string());
 			urlFetcher.fetchUrl(buffer.get(), url);
 
+			// Check to make sure download succeeded
+			if (buffer->size()==0) {
+				std::cerr << "File download failed! Attempted URL:" << std::endl;
+				std::cerr << url << std::endl;
+				continue;
+			}
+			
+			// Important!  Will not work otherwise
+			strBuilder.clear();
+
 			// Construct name for bufferStruct.  Example: "chicagoT-2013-09-23-p3"
-			strBuilder << "chicagoT-";
+			strBuilder << "lstm-chicagoT-";
 			strBuilder << curr_date.year() << "-";
 			strBuilder << std::setfill('0') << std::setw(2);
 			strBuilder << curr_date.month().as_number() << "-";
@@ -126,14 +168,21 @@ int main(int argn, const char** argv) {
 			std::string bufferStructName;
 			strBuilder >> bufferStructName;
 
+			bufferStruct *buffer_struct = new bufferStruct(std::move(buffer), bufferStructName);
 			// Place a new unique_ptr to bufferStruct made from above buffer and bufferStructName in buffer_queue.			
 			buffer_queue.enqueue( 
-					std::unique_ptr<bufferStruct>(new bufferStruct(std::move(buffer), bufferStructName)) );
+					std::unique_ptr<bufferStruct>(buffer_struct) );
+			cout << "Added " << bufferStructName << " to queue" << endl;
 		} 
 	}
 
 	// Let the buffer_munchers know there is no more buffer to munch, send into the queue killer instances.
 	for(int i = 0; i < num_ocr_instances; ++i)
 		buffer_queue.enqueue(std::unique_ptr<bufferStruct>(new bufferStruct(nullptr, std::string(""), true)));
+	
+	for(auto& thread : ocr_threads) {
+		thread.join();
+	}
+	EZ_LOG(lg_, loglib::info) << "Finished all OCR, from " << start_date_str << " to " << end_date_str << " with " << num_pages_to_classify << " pages each ";
 	return 0;
 }
