@@ -34,7 +34,7 @@ using boost::gregorian::days;
 using boost::gregorian::from_simple_string;
 
 // Global variable (gasp) used for orderly winding down main.cpp's main loop
-static bool SIGINT_RECEIVED = false;
+volatile sig_atomic_t SIGINT_RECEIVED = 0;
 
 // Simple struct holding both a string buffer and a name
 struct bufferStruct {
@@ -131,7 +131,7 @@ int main(int argn, const char** argv) {
 	
 	/* Mechanism for interrupting loop using CTRL-C */
 	struct sigaction sigIntHandler;
-	sigIntHandler.sa_handler = [](int s) {SIGINT_RECEIVED=true;};
+	sigIntHandler.sa_handler = [](int s) {SIGINT_RECEIVED=1;}
 	sigemptyset(&sigIntHandler.sa_mask);
 	sigIntHandler.sa_flags = 0;
 	sigaction(SIGINT, &sigIntHandler, NULL);
