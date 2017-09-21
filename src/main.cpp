@@ -5,6 +5,7 @@
 #include <memory>
 #include <cassert>
 #include <sstream>
+#include <signal.h>
 
 #include "logging.hpp"
 #include "util.hpp"
@@ -31,6 +32,9 @@ using loglib::debug;
 using boost::gregorian::date;
 using boost::gregorian::days;
 using boost::gregorian::from_simple_string;
+
+// Global variable (gasp) used for orderly winding down main.cpp's main loop
+static bool SIGINT_RECEIVED = false;
 
 // Simple struct holding both a string buffer and a name
 struct bufferStruct {
@@ -110,7 +114,7 @@ int main(int argn, const char** argv) {
 	}
 	
 	/***********************  Main Control Variables ************************/
-	const int num_ocr_instances = 4;			// Number of OCR instances to run.  Should equal number of cores on machine
+	const int num_ocr_instances = 3;			// Number of OCR instances to run.  Should equal number of cores on machine
 	const int buffer_queue_max_size = 2;		// Doesn't need to be very large.  Increase if internet connection is unreliable
 	const int num_pages_to_classify = 2;		// How many pages deep to go into every daily issue
 
@@ -125,10 +129,24 @@ int main(int argn, const char** argv) {
 	ApiFetch urlFetcher = ApiFetch();
 	urlFetcher.init();
 	
+	/* Mechanism for interrupting loop using CTRL-C */
+	struct sigaction sigIntHandler;
+	sigIntHandler.sa_handler = [](int s) {SIGINT_RECEIVED=true;};
+	sigemptyset(&sigIntHandler.sa_mask);
+	sigIntHandler.sa_flags = 0;
+	sigaction(SIGINT, &sigIntHandler, NULL);
 
 	std::stringstream strBuilder;
 	for(date curr_date = start_date; curr_date <= end_date; curr_date += days(1)) {
 		for(int i = 1; i <= num_pages_to_classify; i++) {
+			// Incase the program was given a (friendly) order to halt
+			if(SIGINT_RECEIVED) {
+				// Write it both in the log and to std::cout
+				EZ_LOG(lg_, loglib::trace) << "ending processing before date " << curr_date << " and page " << i;
+				std::cout << "ending processing before date " << curr_date << " and page" << i;	
+				goto ESCAPE_NESTED_FOR_LOOPS;
+			}
+
 			// Build up URL to then fetch with cURL
 			strBuilder.str("");
 			strBuilder.clear();
@@ -175,6 +193,10 @@ int main(int argn, const char** argv) {
 			cout << "Added " << bufferStructName << " to queue" << endl;
 		} 
 	}
+	
+	// Escaping the nested for loops in case of a SIGINT, lets us safely and peacefully finish off the program
+	// We also naturally get here once there are no more dates left to throw into the queue.
+	ESCAPE_NESTED_FOR_LOOPS:
 
 	// Let the buffer_munchers know there is no more buffer to munch, send into the queue killer instances.
 	for(int i = 0; i < num_ocr_instances; ++i)
