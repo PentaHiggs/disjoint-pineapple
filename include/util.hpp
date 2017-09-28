@@ -7,11 +7,16 @@
 #include<mutex>
 #include<condition_variable>
 #include<climits>
-
+#include<vector>
 
 namespace util {
 
 typedef std::unordered_map<std::string, std::string> dict;
+
+// Helper function for searching in a dictionary for a value with key std::string string.
+// Returns std::string default_string if such a value does not exist.
+std::string getStringFromDict (const std::string &string, const util::dict &dictionary, const std::string &default_string = ""); 
+
 
 // Implements a thread-safe queue of limited length
 // If the queue is empty, calls to dequeue wait on enqueue calls to repopulate the queue.
@@ -112,5 +117,16 @@ bool SharedQueue<T>::empty() {
 	mlock.unlock();
 	return empty;
 }
+
+/* --------------------- END SharedQueue<T> Implementation ----------------------- */
+
+// Parses command-line arguments for the program and returns a dictionary with values
+// as strings.  If strings need to be convertible to another type, such as int, the
+// convertability is checked within this function but not performed.
+bool parse_args(int argc, char* const* argv, dict& parsed_arguments);
+
+// Prints a help statement indicating proper command-line usage of the program.
+void print_help();
+
 } // namespace util
 #endif // UTIL_HPP_

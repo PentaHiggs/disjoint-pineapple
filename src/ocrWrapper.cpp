@@ -10,16 +10,7 @@
 #include "util.hpp"
 
 using loglib::debug;
-
-// Helper function for searching in a dictionary for a value with key std::string string.
-// Returns std::string default_string if such a value does not exist.
-std::string getStringFromDict (const std::string &string, const util::dict &dictionary, const std::string &default_string = "") {
-	auto found_string_it = dictionary.find(string);
-	if (found_string_it != dictionary.end()) // Means that the setting exists
-		return found_string_it->second;
-	else
-		return default_string;
-}
+using util::getStringFromDict;
 
 // Writes the strBuffer to a file, with given filename
 void writeBufferToFile(std::string* strBuffer, std::string filename) {

@@ -3,6 +3,15 @@
 #include <getopt.h>
 
 namespace util {
+
+std::string getStringFromDict (const std::string &string, const util::dict &dictionary, const std::string &default_string) {
+	auto found_string_it = dictionary.find(string);
+	if (found_string_it != dictionary.end()) // Means that the setting exists
+		return found_string_it->second;
+	else
+		return default_string;
+}
+
 void print_help() {
 	std::cout <<
 		"disjoint-pineapple\n"
@@ -86,8 +95,8 @@ bool parse_args(int argc, char* const* argv, dict& parsed_args) {
 		std::cout << "wrong number of position argumens (the dates) given.  See --help for syntax expectations" << std::endl;
 		return false;
 	} else {
-		parsed_args["first_date"] = argv[optind];
-		parsed_args["second_date"] = argv[optind+1];
+		parsed_args["start_date"] = argv[optind];
+		parsed_args["end_date"] = argv[optind+1];
 	}
 	return true;
 }
