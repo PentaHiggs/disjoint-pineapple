@@ -5,7 +5,7 @@
 #include <memory>
 #include <cassert>
 #include <sstream>
-#include <signal.h>
+#include <csignal>
 
 #include "logging.hpp"
 #include "util.hpp"
@@ -84,14 +84,11 @@ void buffer_muncher(util::SharedQueue< std::unique_ptr<bufferStruct> > *buffer_q
 // Parses the input in order to determine start and end dates, expecting input
 // of the form YYYY-MM-DD, e.g. 1840-12-29
 // If this parsing fails, returns false.  Else, returns true
-bool parse_input(date& start_date, date& end_date, std::string& start_date_str,
-		std::string& end_date_str, int argn, const char**& argv) {
-	if (argn != 3) {
-		return false;
-	}
+bool parse_dates(date& start_date, date& end_date, std::string& start_date_str,
+		std::string& end_date_str) {
 	try {
-		start_date = from_simple_string(argv[1]);
-		end_date = from_simple_string(argv[2]);
+		start_date = from_simple_string(start_date_str);
+		end_date = from_simple_string(end_date_str);
 	} catch (...) {
 		return false;
 	}
@@ -100,23 +97,36 @@ bool parse_input(date& start_date, date& end_date, std::string& start_date_str,
 	return true;	
 }
 
-int main(int argn, const char** argv) {	
+int main(int argn, char** argv) {	
 	loglib::init();
 	loglib::logger lg_;
 	
 	date start_date;
 	date end_date;
-	std::string start_date_str;
-	std::string end_date_str;
+	
+	util::dict parsed_args;
+	if(!util::parse_args(argn, argv, parsed_args)) return false;
 
-	if (!parse_input(start_date, end_date, start_date_str, end_date_str, argn, argv)) {
+	std::string start_date_str = util::getStringFromDict("start_date", parsed_args, "");
+	std::string end_date_str = util::getStringFromDict("end_date", parsed_args, "");
+	
+	if (!parse_dates(start_date, end_date, start_date_str, end_date_str)) {
+		std::cerr << "Invalid dates given" << std::endl;
 		return false;
 	}
 	
 	/***********************  Main Control Variables ************************/
-	const int num_ocr_instances = 3;			// Number of OCR instances to run.  Should equal number of cores on machine
-	const int buffer_queue_max_size = 2;		// Doesn't need to be very large.  Increase if internet connection is unreliable
-	const int num_pages_to_classify = 2;		// How many pages deep to go into every daily issue
+	// Number of OCR instances to run.  Should equal number of cores on machine
+	const int num_ocr_instances = std::stoi(util::getStringFromDict(
+		"num_ocr_instances", parsed_args, "3"));
+
+	// Doesn't need to be very large.  Increase if internet connection is unreliable	
+	const int buffer_queue_max_size = std::stoi(util::getStringFromDict(
+			"buffer_queue_max_size", parsed_args, "2"));
+
+	// How many pages deep to go into every daily issue	
+	const int num_pages_to_classify = std::stoi(util::getStringFromDict(
+			"num_pages_to_classify", parsed_args, "2"));		
 
 	util::SharedQueue< std::unique_ptr<bufferStruct> > buffer_queue(buffer_queue_max_size);
 	
@@ -131,7 +141,7 @@ int main(int argn, const char** argv) {
 	
 	/* Mechanism for interrupting loop using CTRL-C */
 	struct sigaction sigIntHandler;
-	sigIntHandler.sa_handler = [](int s) {SIGINT_RECEIVED=1;}
+	sigIntHandler.sa_handler = [](int s) {SIGINT_RECEIVED=1;};
 	sigemptyset(&sigIntHandler.sa_mask);
 	sigIntHandler.sa_flags = 0;
 	sigaction(SIGINT, &sigIntHandler, NULL);
@@ -162,6 +172,7 @@ int main(int argn, const char** argv) {
 			std::string url;
 			strBuilder >> url;
 			
+			std::cerr << "Built string: " << url <<std::endl;
 			std::unique_ptr<std::string> buffer(new std::string());
 			urlFetcher.fetchUrl(buffer.get(), url);
 

@@ -43,8 +43,8 @@ BOOST_AUTO_TEST_CASE(parse_args_plain)
 	for (size_t i = 0; i < nArgs; i++) {arguments[i] = arguments_[i];}
 	
 	util::dict expected_output = {
-		{"first_date",			"1930-12-10"},
-		{"second_date",			"1931-04-09"}
+		{"start_date",			"1930-12-10"},
+		{"end_date",			"1931-04-09"}
 	};
 
 	util::dict actual_output;
@@ -73,8 +73,8 @@ BOOST_AUTO_TEST_CASE(parse_args_with_options)
 		{"num_ocr_instances",		"8"},
 		{"buffer_queue_max_size",	"2"},
 		{"num_pages_to_classify",	"7"},
-		{"first_date",				"1924-12-14"},
-		{"second_date",				"1930-01-29"}
+		{"start_date",				"1924-12-14"},
+		{"end_date",				"1930-01-29"}
 	};
 
 	util::dict actual_output;
