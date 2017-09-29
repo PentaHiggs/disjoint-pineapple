@@ -18,12 +18,6 @@ main: bin/main.o bin/logging.o bin/api_fetch.o bin/ocrWrapper.o bin/util.o
 bin/main.o: src/main.cpp include/logging.hpp include/api_fetch.hpp include/ocrWrapper.hpp include/util.hpp
 	$(CC) $(CFLAGS) -c -I/usr/include -o bin/main.o src/main.cpp -DBOOST_LOG_DYN_LINK
 
-logging_test: bin/logging.o bin/logging_test.o
-	$(CC) $(CFLAGS) bin/logging.o bin/logging_test.o -o bin/logging_test -DBOOST_LOG_DYN_LINK $(LOG_LDFLAGS)
-
-bin/logging_test.o: tests/logging_test.cpp include/logging.hpp
-	$(CC) $(LOG_CFLAGS) -o bin/logging_test.o tests/logging_test.cpp -DBOOST_LOG_DYN_LINK
-
 bin/logging.o: src/logging.cpp include/logging.hpp
 	$(CC) $(LOG_CFLAGS) -o bin/logging.o src/logging.cpp -DBOOST_LOG_DYN_LINK
 
@@ -35,6 +29,9 @@ bin/ocrWrapper.o: src/ocrWrapper.cpp include/ocrWrapper.hpp include/logging.hpp 
 
 bin/util.o: include/util.hpp src/util.cpp
 	$(CC) $(CFLAGS) -c -o bin/util.o src/util.cpp -DBOOST_LOG_DYN_LINK
+
+test:
+	cd tests; make
 
 clean:
 	\rm -f bin/*
