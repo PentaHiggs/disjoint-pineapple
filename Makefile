@@ -33,5 +33,8 @@ bin/util.o: include/util.hpp src/util.cpp
 test:
 	cd tests; make
 
+runtest:
+	cd tests; make runtest
+
 clean:
 	\rm -f bin/*

@@ -11,6 +11,8 @@ TEST_LDFLAGS = -lboost_unit_test_framework
 util_test: util_test.cpp
 	cd $(BASE_DIR); make bin/util.o
 	$(CC) $(CFLAGS) -I/usr/include -o $(EXEC_DIR)/util_test $(EXEC_DIR)/util.o $(INCL_DIR)/util.hpp util_test.cpp $(TEST_LDFLAGS)
-	
+
+runtest: util_test
+	cd $(EXEC_DIR); ./*_test
 clean:
 	\rm -f bin/*
